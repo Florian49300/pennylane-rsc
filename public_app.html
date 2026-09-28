@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Retraitement Écritures Comptables</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+
+  header {
+    background: #1a1a2e; color: white;
+    padding: 18px 32px; display: flex; align-items: center; gap: 14px;
+  }
+  header h1 { font-size: 17px; font-weight: 600; }
+  header p { font-size: 12px; color: #8899bb; margin-top: 2px; }
+
+  /* ── PAGES ── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 28px 20px; }
+
+  /* ── SITE SELECTION ── */
+  .site-intro { text-align: center; padding: 32px 0 24px; }
+  .site-intro h2 { font-size: 22px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
+  .site-intro p { font-size: 14px; color: #7a8bbf; }
+
+  .sites-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 8px; }
+  .site-card {
+    background: white; border: 1.5px solid #e2e6f0;
+    border-radius: 14px; padding: 32px 20px;
+    text-align: center; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .site-card:hover { border-color: #4a6cf7; transform: translateY(-3px); box-shadow: 0 8px 24px rgba(74,108,247,0.12); }
+  .site-card .icon {
+    width: 56px; height: 56px; border-radius: 14px;
+    background: #f0f3ff; margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .site-card h3 { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-bottom: 6px; }
+  .site-card p { font-size: 12px; color: #9aa5c0; }
+  .site-card.no-mapping .icon { background: #f0fdf4; }
+  .site-card.no-mapping:hover { border-color: #16a34a; box-shadow: 0 8px 24px rgba(22,163,74,0.12); }
+
+  /* ── TRAITEMENT ── */
+  .page-header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 20px 0 24px;
+  }
+  .btn-back {
+    display: flex; align-items: center; gap: 6px;
+    background: white; border: 1px solid #e2e6f0;
+    border-radius: 8px; padding: 8px 14px;
+    font-size: 13px; color: #5a6a8a; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .btn-back:hover { border-color: #4a6cf7; color: #4a6cf7; }
+  .site-badge {
+    padding: 6px 14px; border-radius: 20px;
+    font-size: 13px; font-weight: 700;
+    background: #1a1a2e; color: white;
+    letter-spacing: 0.03em;
+  }
+
+  /* ── CARDS ── */
+  .card { background: white; border-radius: 12px; border: 1px solid #e2e6f0; margin-bottom: 20px; overflow: hidden; }
+  .card-header {
+    padding: 14px 20px; border-bottom: 1px solid #f0f2f8;
+    display: flex; align-items: center; gap: 10px; background: #fafbff;
+  }
+  .card-header .step {
+    width: 26px; height: 26px; background: #1a1a2e; color: white;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+  }
+  .card-header h2 { font-size: 14px; font-weight: 600; color: #1a1a2e; }
+  .card-body { padding: 20px; }
+
+  /* Upload */
+  .upload-zone {
+    border: 2px dashed #c8d0e7; border-radius: 10px;
+    padding: 36px 20px; text-align: center; cursor: pointer;
+    transition: all 0.2s; background: #fafbff;
+  }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: #4a6cf7; background: #f0f3ff; }
+  .upload-zone p { color: #7a8bbf; font-size: 14px; }
+  .upload-zone strong { color: #4a6cf7; }
+  #fileInput { display: none; }
+  .file-loaded {
+    display: flex; align-items: center; gap: 12px;
+    background: #f0fdf4; border: 1px solid #86efac;
+    border-radius: 8px; padding: 12px 16px; margin-top: 12px;
+  }
+  .file-loaded span { font-size: 13px; color: #15803d; font-weight: 500; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat-card { background: #fafbff; border: 1px solid #e2e6f0; border-radius: 8px; padding: 14px 16px; text-align: center; }
+  .stat-card .num { font-size: 24px; font-weight: 700; color: #1a1a2e; }
+  .stat-card .lbl { font-size: 11px; color: #7a8bbf; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-card.filtered .num { color: #dc2626; }
+  .stat-card.kept .num { color: #16a34a; }
+
+  /* Mapping */
+  .mapping-header {
+    display: grid; grid-template-columns: 1fr 24px 1fr; gap: 8px;
+    padding: 8px 10px; background: #f0f2f8; border-radius: 6px;
+    margin-bottom: 8px; font-size: 12px; font-weight: 600;
+    color: #5a6a8a; text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .mapping-header .arrow { text-align: center; }
+  .mapping-row { display: grid; grid-template-columns: 1fr 24px 1fr; gap: 8px; margin-bottom: 6px; align-items: center; }
+  .mapping-row input {
+    width: 100%; padding: 8px 10px;
+    border: 1px solid #d0d8ec; border-radius: 6px;
+    font-size: 13px; font-family: 'Courier New', monospace;
+    color: #5a6a8a; background: #f5f6fa; cursor: default;
+  }
+  .mapping-arrow { text-align: center; color: #9aa5c0; font-size: 16px; }
+  .no-mapping-msg {
+    text-align: center; padding: 20px;
+    color: #9aa5c0; font-size: 13px;
+    background: #f9fafb; border-radius: 8px;
+    border: 1px dashed #e2e6f0;
+  }
+  .no-mapping-msg strong { display: block; color: #16a34a; font-size: 14px; margin-bottom: 4px; }
+
+  /* Options */
+  .option-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #f5f6fa; }
+  .option-row:last-child { border-bottom: none; }
+  .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; inset: 0; background: #d0d8ec; border-radius: 22px; cursor: pointer; transition: 0.2s; }
+  .toggle-slider:before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: 0.2s; }
+  .toggle input:checked + .toggle-slider { background: #4a6cf7; }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
+  .option-text strong { font-size: 13px; color: #1a1a2e; font-weight: 600; display: block; }
+  .option-text span { font-size: 12px; color: #9aa5c0; }
+
+  /* Preview */
+  .preview-wrap { overflow-x: auto; }
+  table.preview { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.preview th { background: #1a1a2e; color: #aabbdd; padding: 8px 10px; text-align: left; font-weight: 600; white-space: nowrap; }
+  table.preview td { padding: 6px 10px; border-bottom: 1px solid #f0f2f8; white-space: nowrap; }
+  table.preview tr:hover td { background: #fafbff; }
+  table.preview .tag { padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  table.preview .tag-ve { background: #dbeafe; color: #1d4ed8; }
+  .preview-note { font-size: 12px; color: #9aa5c0; margin-top: 10px; text-align: center; }
+
+  /* Export */
+  .sep-config { display: flex; align-items: center; gap: 10px; }
+  .sep-config label { font-size: 13px; color: #5a6a8a; white-space: nowrap; }
+  .sep-config input { width: 60px; padding: 6px 10px; border: 1px solid #d0d8ec; border-radius: 6px; font-size: 13px; text-align: center; font-family: monospace; }
+  .sep-config input:focus { outline: none; border-color: #4a6cf7; }
+  .sep-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sep-preset { padding: 4px 10px; border: 1px solid #d0d8ec; border-radius: 4px; font-size: 12px; cursor: pointer; background: white; font-family: monospace; transition: all 0.15s; }
+  .sep-preset:hover { border-color: #4a6cf7; color: #4a6cf7; }
+  .btn-export {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 14px; background: #1a1a2e; color: white;
+    border: none; border-radius: 10px; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; margin-top: 18px;
+  }
+  .btn-export:hover { background: #2d2d50; transform: translateY(-1px); }
+  .success-msg {
+    display: none; align-items: center; gap: 10px;
+    background: #f0fdf4; border: 1px solid #86efac;
+    border-radius: 8px; padding: 12px 16px; margin-top: 12px;
+  }
+  .success-msg.show { display: flex; }
+  .success-msg span { font-size: 13px; color: #15803d; font-weight: 500; }
+
+  /* ── PENNYLANE CONNECTOR ── */
+  .pennylane-header { display: flex; align-items: center; gap: 10px; }
+  .pennylane-logo { width: 28px; height: 28px; background: #FF6B35; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .token-wrap { position: relative; margin-bottom: 12px; }
+  .token-wrap input {
+    width: 100%; padding: 10px 44px 10px 14px;
+    border: 1.5px solid #d0d8ec; border-radius: 8px;
+    font-size: 13px; font-family: 'Courier New', monospace;
+    color: #1a1a2e; outline: none; transition: border-color 0.2s;
+    background: #fafbff;
+  }
+  .token-wrap input:focus { border-color: #4a6cf7; }
+  .token-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #9aa5c0; padding: 4px; }
+  .token-eye:hover { color: #4a6cf7; }
+  .token-hint { font-size: 11px; color: #9aa5c0; margin-top: 4px; margin-bottom: 16px; }
+  .token-hint a { color: #4a6cf7; text-decoration: none; }
+  .token-hint a:hover { text-decoration: underline; }
+
+  .btn-pennylane {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 14px; background: #FF6B35; color: white;
+    border: none; border-radius: 10px; font-size: 15px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; margin-top: 4px;
+  }
+  .btn-pennylane:hover:not(:disabled) { background: #e55a25; transform: translateY(-1px); }
+  .btn-pennylane:disabled { background: #ffd5c5; cursor: not-allowed; transform: none; }
+
+  .pl-log {
+    margin-top: 14px; border-radius: 8px; overflow: hidden;
+    border: 1px solid #e2e6f0; display: none;
+  }
+  .pl-log.show { display: block; }
+  .pl-log-header {
+    background: #1a1a2e; color: #aabbdd; padding: 8px 14px;
+    font-size: 12px; font-weight: 600; display: flex; justify-content: space-between;
+  }
+  .pl-log-body { background: #0d1117; padding: 12px 14px; max-height: 220px; overflow-y: auto; }
+  .pl-log-line { font-size: 12px; font-family: 'Courier New', monospace; padding: 2px 0; }
+  .pl-log-line.ok { color: #4ade80; }
+  .pl-log-line.err { color: #f87171; }
+  .pl-log-line.info { color: #93c5fd; }
+  .pl-log-line.warn { color: #fbbf24; }
+
+  .pl-progress { margin-top: 12px; display: none; }
+  .pl-progress.show { display: block; }
+  .pl-progress-bar-wrap { background: #e2e6f0; border-radius: 20px; height: 8px; overflow: hidden; }
+  .pl-progress-bar { height: 100%; background: #FF6B35; border-radius: 20px; transition: width 0.3s; width: 0%; }
+  .pl-progress-label { font-size: 12px; color: #7a8bbf; margin-top: 6px; text-align: center; }
+
+  .pl-summary { display: none; align-items: center; gap: 10px; border-radius: 8px; padding: 12px 16px; margin-top: 12px; }
+  .pl-summary.success { display: flex; background: #f0fdf4; border: 1px solid #86efac; }
+  .pl-summary.error   { display: flex; background: #fef2f2; border: 1px solid #fca5a5; }
+  .pl-summary span { font-size: 13px; font-weight: 500; }
+  .pl-summary.success span { color: #15803d; }
+  .pl-summary.error span   { color: #dc2626; }
+
+  .cors-warning {
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 14px; font-size: 12px; color: #92400e;
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .cors-warning svg { flex-shrink: 0; margin-top: 1px; }
+
+
+</style>
+</head>
+<body>
+
+
+
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <path d="M3 9h18M9 21V9"/>
+  </svg>
+  <div>
+    <h1>Retraitement des Écritures Comptables</h1>
+    <p>Import Excel · Filtrage · Remapping comptes · Export CSV</p>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════
+     PAGE 1 — SÉLECTION DU SITE
+══════════════════════════════════════════ -->
+<div class="page active" id="pageSite">
+  <div class="container">
+    <div class="site-intro">
+      <h2>Sélectionnez votre site</h2>
+      <p>Les paramètres de retraitement seront chargés automatiquement selon le site choisi.</p>
+    </div>
+    <div class="sites-grid">
+
+      <div class="site-card" onclick="selectSite('GRAND CLOS')">
+        <div class="icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#4a6cf7" stroke-width="1.8">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        </div>
+        <h3>Grand Clos</h3>
+        <p>&nbsp;</p>
+      </div>
+
+      <div class="site-card" onclick="selectSite('CHINON')">
+        <div class="icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#4a6cf7" stroke-width="1.8">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        </div>
+        <h3>Chinon</h3>
+        <p>&nbsp;</p>
+      </div>
+
+      <div class="site-card no-mapping" onclick="selectSite('BEAUCOUZE')">
+        <div class="icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="1.8">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        </div>
+        <h3>Beaucouz&eacute;</h3>
+        <p>&nbsp;</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PAGE 2 — TRAITEMENT
+══════════════════════════════════════════ -->
+<div class="page" id="pageTraitement">
+  <div class="container">
+
+    <div class="page-header">
+      <button class="btn-back" onclick="goBack()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        Changer de site
+      </button>
+      <span class="site-badge" id="siteBadge">—</span>
+    </div>
+
+    <!-- Étape 1 : Import -->
+    <div class="card">
+      <div class="card-header"><div class="step">1</div><h2>Importer le fichier Excel</h2></div>
+      <div class="card-body">
+        <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#7a8bbf" stroke-width="1.5" style="margin-bottom:10px">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p>Glisser-déposer votre fichier ici, ou <strong>cliquer pour parcourir</strong></p>
+          <p style="font-size:12px;margin-top:6px;color:#9aa5c0">Formats acceptés : .xlsx, .xls, .zip</p>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.zip">
+        <div class="file-loaded" id="fileLoaded" style="display:none">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span id="fileName">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Étape 2 : Stats -->
+    <div class="card" id="statsCard" style="display:none">
+      <div class="card-header"><div class="step">2</div><h2>Analyse du fichier</h2></div>
+      <div class="card-body">
+        <div class="stats-grid">
+          <div class="stat-card"><div class="num" id="statTotal">—</div><div class="lbl">Lignes totales</div></div>
+          <div class="stat-card filtered"><div class="num" id="statCA">—</div><div class="lbl">Lignes CA supprimées</div></div>
+          <div class="stat-card filtered"><div class="num" id="statNull">—</div><div class="lbl">Montants nuls supprimés</div></div>
+          <div class="stat-card kept"><div class="num" id="statKept">—</div><div class="lbl">Lignes conservées</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Étape 3 : Mapping -->
+    <div class="card" id="mappingCard" style="display:none">
+      <div class="card-header"><div class="step">3</div><h2>Correspondance des comptes comptables</h2></div>
+      <div class="card-body">
+        <div id="mappingContent"></div>
+      </div>
+    </div>
+
+    <!-- Étape 4 : Options -->
+    <div class="card" id="optionsCard" style="display:none">
+      <div class="card-header"><div class="step">4</div><h2>Options de filtrage</h2></div>
+      <div class="card-body">
+        <div class="option-row">
+          <label class="toggle"><input type="checkbox" id="optCA" checked><span class="toggle-slider"></span></label>
+          <div class="option-text">
+            <strong>Supprimer les lignes du journal CA</strong>
+            <span>Toutes les écritures avec CodeJournal = "CA" seront retirées</span>
+          </div>
+        </div>
+        <div class="option-row">
+          <label class="toggle"><input type="checkbox" id="optNull" checked><span class="toggle-slider"></span></label>
+          <div class="option-text">
+            <strong>Supprimer les lignes à montants nuls</strong>
+            <span>Lignes où Débit = 0 ET Crédit = 0 simultanément</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Étape 5 : Aperçu -->
+    <div class="card" id="previewCard" style="display:none">
+      <div class="card-header"><div class="step">5</div><h2>Aperçu des données retraitées</h2></div>
+      <div class="card-body">
+        <div class="preview-wrap">
+          <table class="preview">
+            <thead><tr>
+              <th>DateExport</th><th>CodeJournal</th><th>Compte</th>
+              <th>NumeroPiece</th><th>Libelle</th><th>Debit</th><th>Credit</th>
+            </tr></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+        <p class="preview-note" id="previewNote"></p>
+        <div style="text-align:right;margin-top:10px">
+          <button onclick="refreshPreview()" style="border:1px solid #d0d8ec;background:white;border-radius:6px;padding:6px 14px;font-size:12px;cursor:pointer;color:#5a6a8a">↻ Actualiser l'aperçu</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Étape 6 : Export -->
+
+    <div class="card" id="exportCard" style="display:none">
+      <div class="card-header"><div class="step">6</div><h2>Exporter le fichier</h2></div>
+      <div class="card-body">
+        <div class="sep-config">
+          <label>Séparateur :</label>
+          <input type="text" id="sepInput" value=";" maxlength="5">
+          <div class="sep-presets">
+            <button class="sep-preset" onclick="setSep(';')">; point-virgule</button>
+            <button class="sep-preset" onclick="setSep('\t')">TAB</button>
+            <button class="sep-preset" onclick="setSep('|')">| pipe</button>
+            <button class="sep-preset" onclick="setSep(','">'>, virgule</button>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <label style="font-size:13px;color:#5a6a8a;display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="inclHeader" checked style="width:16px;height:16px;cursor:pointer">
+            Inclure la ligne d'en-tête dans le fichier exporté
+          </label>
+        </div>
+        <button class="btn-export" onclick="exportTxt()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Exporter en fichier .CSV
+        </button>
+        <div class="success-msg" id="successMsg">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <span id="successText">Fichier exporté avec succès !</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Étape 7 : Envoi vers Pennylane -->
+    <div class="card" id="pennylaneCard" style="display:none">
+      <div class="card-header">
+        <div class="step" style="background:#FF6B35">7</div>
+        <div class="pennylane-header">
+          <h2>Envoyer vers Pennylane</h2>
+        </div>
+      </div>
+      <div class="card-body">
+
+        <div class="cors-warning">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#92400e" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <div>
+            <strong>Prérequis :</strong> Cette fonctionnalité nécessite le serveur proxy <strong>serveur_pennylane.js</strong>.
+            Ouvrez un invite de commandes dans votre dossier et tapez <code style="background:#fef3c7;padding:1px 5px;border-radius:3px">node serveur_pennylane.js</code>,
+            puis accédez à l'application via <strong>http://localhost:3000</strong> (et non en ouvrant le fichier directement).
+          </div>
+        </div>
+
+        <label style="font-size:13px;font-weight:600;color:#1a1a2e;display:block;margin-bottom:6px">Token d'API Pennylane</label>
+        <div class="token-wrap">
+          <input type="password" id="plToken" placeholder="Collez votre token ici (ex: eyJ0eXAiOi...)">
+          <button class="token-eye" onclick="toggleToken()" tabindex="-1">
+            <svg id="tokenEyeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+        <p class="token-hint">
+          Générez votre token dans <strong>Pennylane → Paramètres → Connectivité → API</strong>
+          &nbsp;·&nbsp; <a href="https://pennylane.readme.io/docs/generating-my-api-token" target="_blank">Aide</a>
+        </p>
+
+        <label style="font-size:13px;font-weight:600;color:#1a1a2e;display:block;margin-bottom:6px">Environnement</label>
+        <div style="display:flex;gap:10px;margin-bottom:16px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 14px;border:1.5px solid #d0d8ec;border-radius:8px;background:#fafbff;flex:1;transition:all 0.15s" id="envProdLabel">
+            <input type="radio" name="plEnv" value="production" id="envProd" checked onchange="updateEnvStyle()">
+            <span>🚀 Production</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;padding:8px 14px;border:1.5px solid #d0d8ec;border-radius:8px;background:#fafbff;flex:1;transition:all 0.15s" id="envSandboxLabel">
+            <input type="radio" name="plEnv" value="sandbox" id="envSandbox" onchange="updateEnvStyle()">
+            <span>🧪 Sandbox (test)</span>
+          </label>
+        </div>
+
+        <label style="font-size:13px;font-weight:600;color:#1a1a2e;display:block;margin-bottom:6px">Code du journal cible dans Pennylane</label>
+        <input type="text" id="plJournal" placeholder="Ex: VE, OD, BQ..." value="OD"
+          style="width:200px;padding:8px 12px;border:1.5px solid #d0d8ec;border-radius:8px;font-size:13px;font-family:'Courier New',monospace;color:#1a1a2e;outline:none;margin-bottom:16px">
+
+        <button class="btn-pennylane" id="btnSendPL" onclick="sendToPennylane()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+          Envoyer les écritures vers Pennylane
+        </button>
+
+        <div class="pl-progress" id="plProgress">
+          <div class="pl-progress-bar-wrap"><div class="pl-progress-bar" id="plProgressBar"></div></div>
+          <div class="pl-progress-label" id="plProgressLabel">Initialisation...</div>
+        </div>
+
+        <div class="pl-summary" id="plSummary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" id="plSummaryIcon"></svg>
+          <span id="plSummaryText"></span>
+        </div>
+
+        <div class="pl-log" id="plLog">
+          <div class="pl-log-header">
+            <span>Journal d'envoi</span>
+            <span id="plLogCount">0 lignes</span>
+          </div>
+          <div class="pl-log-body" id="plLogBody"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── TABLES DE CORRESPONDANCE ──────────────────────────────
+const MAPPINGS = {
+  'GRAND CLOS': [
+    ['411VIBSECO', '62381'],
+    ['511ESPECES',  '511000003'],
+    ['511CHEQUES',  '511000002'],
+    ['511CB000',    '511000004'],
+    ['511KADEOS',   '511000001'],
+    ['511CADHOC',   '511000007'],
+    ['511SODEXO',   '511000008'],
+    ['511BEST0',    '511000009'],
+    ['511SHOPPIN',  '51100011'],
+    ['511CADO0',    '511000006'],
+    ['511ILLICAD',  '511000005'],
+    ['7581ECART',   '758'],
+  ],
+  'CHINON': [
+    ['411VIBSECO', '62381'],
+    ['511ESPECES',  '511000003'],
+    ['511CHEQUES',  '511000007'],
+    ['511CB000',    '511000002'],
+    ['511KADEOS',   '511000004'],
+    ['511CADHOC',   '511000011'],
+    ['511SODEXO',   '511000006'],
+    ['511BEST0',    '511000008'],
+    ['511SHOPPIN',  '511000009'],
+    ['511CADO0',    '511000005'],
+    ['511ILLICAD',  '511000001'],
+    ['7581ECART',   '758'],
+  ],
+  'BEAUCOUZE': []
+};
+
+// ── STATE ─────────────────────────────────────────────────
+let currentSite = null;
+let rawData = [];
+let headers = [];
+
+// ── NAVIGATION ────────────────────────────────────────────
+function selectSite(site) {
+  currentSite = site;
+  document.getElementById('siteBadge').textContent = site;
+  document.getElementById('pageSite').classList.remove('active');
+  document.getElementById('pageTraitement').classList.add('active');
+  resetTraitement();
+}
+
+function goBack() {
+  document.getElementById('pageTraitement').classList.remove('active');
+  document.getElementById('pageSite').classList.add('active');
+  currentSite = null;
+  rawData = [];
+  headers = [];
+}
+
+function resetTraitement() {
+  rawData = []; headers = [];
+  document.getElementById('fileLoaded').style.display = 'none';
+  document.getElementById('fileName').textContent = '—';
+  document.getElementById('fileInput').value = '';
+  ['statsCard','mappingCard','optionsCard','previewCard','exportCard','pennylaneCard'].forEach(id =>
+    document.getElementById(id).style.display = 'none'
+  );
+  document.getElementById('successMsg').classList.remove('show');
+}
+
+// ── DRAG & DROP ───────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const dropZone = document.getElementById('dropZone');
+  if (dropZone) {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault(); dropZone.classList.remove('drag-over');
+      if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]);
+    });
+  }
+  const fileInput = document.getElementById('fileInput');
+  if (fileInput) {
+    fileInput.addEventListener('change', e => {
+      if (e.target.files[0]) processFile(e.target.files[0]);
+    });
+  }
+});
+
+// ── IMPORT EXCEL ──────────────────────────────────────────
+function processFile(file) {
+  const isZip = file.name.toLowerCase().endsWith('.zip') ||
+                file.type === 'application/zip' ||
+                file.type === 'application/x-zip-compressed';
+
+  if (isZip) {
+    processZipFile(file);
+  } else {
+    processExcelFile(file, file.name);
+  }
+}
+
+// Extrait le fichier Excel contenu dans une archive .zip
+function processZipFile(zipFile) {
+  document.getElementById('fileName').textContent = 'Décompression de ' + zipFile.name + '...';
+  document.getElementById('fileLoaded').style.display = 'flex';
+
+  JSZip.loadAsync(zipFile)
+    .then(zip => {
+      // Cherche le premier fichier .xlsx ou .xls dans l'archive (ignore les dossiers et fichiers cachés __MACOSX)
+      const candidates = Object.keys(zip.files).filter(name => {
+        const lower = name.toLowerCase();
+        return !zip.files[name].dir &&
+               !lower.includes('__macosx') &&
+               !lower.startsWith('.') &&
+               (lower.endsWith('.xlsx') || lower.endsWith('.xls'));
+      });
+
+      if (candidates.length === 0) {
+        alert('Aucun fichier Excel (.xlsx/.xls) trouvé dans l\'archive zip.');
+        document.getElementById('fileLoaded').style.display = 'none';
+        return;
+      }
+
+      const targetName = candidates[0];
+      if (candidates.length > 1) {
+        console.warn('Plusieurs fichiers Excel trouvés dans le zip, utilisation du premier :', targetName);
+      }
+
+      return zip.files[targetName].async('arraybuffer').then(buffer => {
+        processExcelBuffer(buffer, `${zipFile.name} → ${targetName}`);
+      });
+    })
+    .catch(err => {
+      alert('Erreur lors de la lecture du fichier zip : ' + err.message);
+      document.getElementById('fileLoaded').style.display = 'none';
+    });
+}
+
+// Lit un fichier Excel "normal" (File object) via FileReader
+function processExcelFile(file, displayName) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    processExcelBuffer(e.target.result, displayName);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Traite un ArrayBuffer Excel (commun aux deux chemins : direct ou extrait d'un zip)
+function processExcelBuffer(arrayBuffer, displayName) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  if (json.length < 2) { alert('Fichier vide ou non reconnu.'); document.getElementById('fileLoaded').style.display = 'none'; return; }
+
+  headers = json[0].map(h => String(h).trim());
+  rawData = json.slice(1).filter(r => r.some(c => c !== ''));
+
+  document.getElementById('fileName').textContent = displayName + ' — ' + rawData.length + ' lignes importées';
+  document.getElementById('fileLoaded').style.display = 'flex';
+
+  ['statsCard','mappingCard','optionsCard','previewCard','exportCard','pennylaneCard'].forEach(id =>
+    document.getElementById(id).style.display = 'block'
+  );
+
+  buildMappingTable();
+  updateStats();
+  refreshPreview();
+}
+
+// ── TABLE DE CORRESPONDANCE ───────────────────────────────
+function buildMappingTable() {
+  const mapping = MAPPINGS[currentSite] || [];
+  const container = document.getElementById('mappingContent');
+
+  if (mapping.length === 0) {
+    container.innerHTML = `
+      <div class="no-mapping-msg">
+        <strong>✓ Aucun remapping nécessaire</strong>
+        Les comptes comptables de ce site sont conservés tels quels.
+      </div>`;
+    return;
+  }
+
+  let html = `<div class="mapping-header">
+    <div>Compte source (original)</div>
+    <div class="arrow">→</div>
+    <div>Compte cible (nouveau)</div>
+  </div>`;
+
+  mapping.forEach(([src, tgt]) => {
+    html += `<div class="mapping-row">
+      <input type="text" value="${src}" readonly>
+      <div class="mapping-arrow">→</div>
+      <input type="text" value="${tgt}" readonly>
+    </div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+// ── TRAITEMENT ────────────────────────────────────────────
+function getMappingDict() {
+  const dict = {};
+  (MAPPINGS[currentSite] || []).forEach(([src, tgt]) => { dict[src] = tgt; });
+  return dict;
+}
+
+function parseAmount(val) {
+  return parseFloat(String(val).replace(/\s/g, '').replace(',', '.')) || 0;
+}
+
+function getProcessedData() {
+  const optCA   = document.getElementById('optCA').checked;
+  const optNull = document.getElementById('optNull').checked;
+  const idxJ = headers.indexOf('CodeJournal');
+  const idxD = headers.indexOf('Debit');
+  const idxC = headers.indexOf('Credit');
+  const idxA = headers.indexOf('Compte');
+  const mapping = getMappingDict();
+
+  return rawData.filter(row => {
+    if (optCA  && idxJ >= 0 && String(row[idxJ]).trim().toUpperCase() === 'CA') return false;
+    if (optNull && idxD >= 0 && idxC >= 0 && parseAmount(row[idxD]) === 0 && parseAmount(row[idxC]) === 0) return false;
+    return true;
+  }).map(row => {
+    const r = [...row];
+    if (idxA >= 0) {
+      const orig = String(r[idxA]).trim();
+      if (mapping[orig]) r[idxA] = mapping[orig];
+    }
+    return r;
+  });
+}
+
+function updateStats() {
+  const total = rawData.length;
+  const idxJ = headers.indexOf('CodeJournal');
+  const idxD = headers.indexOf('Debit');
+  const idxC = headers.indexOf('Credit');
+  let countCA = 0, countNull = 0;
+  rawData.forEach(row => {
+    const isCA = idxJ >= 0 && String(row[idxJ]).trim().toUpperCase() === 'CA';
+    const d = idxD >= 0 ? parseAmount(row[idxD]) : 1;
+    const c = idxC >= 0 ? parseAmount(row[idxC]) : 1;
+    if (isCA) countCA++;
+    else if (d === 0 && c === 0) countNull++;
+  });
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statCA').textContent = countCA;
+  document.getElementById('statNull').textContent = countNull;
+  document.getElementById('statKept').textContent = total - countCA - countNull;
+}
+
+function refreshPreview() {
+  const data = getProcessedData();
+  const body = document.getElementById('previewBody');
+  body.innerHTML = '';
+  const idxJ = headers.indexOf('CodeJournal');
+  data.slice(0, 50).forEach(row => {
+    const tr = document.createElement('tr');
+    row.forEach((cell, i) => {
+      const td = document.createElement('td');
+      if (i === idxJ) {
+        const tag = document.createElement('span');
+        tag.className = 'tag tag-' + String(cell).toLowerCase();
+        tag.textContent = cell;
+        td.appendChild(tag);
+      } else {
+        td.textContent = cell;
+      }
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  document.getElementById('previewNote').textContent = data.length > 50
+    ? `Aperçu : 50 premières lignes sur ${data.length} au total`
+    : `${data.length} lignes au total après retraitement`;
+  document.getElementById('statKept').textContent = data.length;
+}
+
+// ── EXPORT ────────────────────────────────────────────────
+function setSep(s) { document.getElementById('sepInput').value = s; }
+
+function exportTxt() {
+  const data  = getProcessedData();
+  const sep   = document.getElementById('sepInput').value || ';';
+  const inclH = document.getElementById('inclHeader').checked;
+  const lines = [];
+  if (inclH) lines.push(headers.join(sep));
+  data.forEach(row => lines.push(row.map(c => String(c)).join(sep)));
+
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const now  = new Date();
+  const ts   = now.getFullYear().toString().slice(2)
+    + String(now.getMonth()+1).padStart(2,'0')
+    + String(now.getDate()).padStart(2,'0');
+  const siteName = currentSite.replace(/\s+/g, '_');
+  a.href = url;
+  a.download = `ecritures_${siteName}_${ts}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  document.getElementById('successText').textContent =
+    `✓ ${data.length} lignes exportées dans ecritures_${siteName}_${ts}.csv`;
+  document.getElementById('successMsg').classList.add('show');
+  setTimeout(() => document.getElementById('successMsg').classList.remove('show'), 5000);
+}
+
+
+
+
+// ── PENNYLANE CONNECTOR ───────────────────────────────────
+
+function toggleToken() {
+  const inp = document.getElementById('plToken');
+  const icon = document.getElementById('tokenEyeIcon');
+  if (inp.type === 'password') {
+    inp.type = 'text';
+    icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
+  } else {
+    inp.type = 'password';
+    icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+  }
+}
+
+function updateEnvStyle() {
+  const prod    = document.getElementById('envProd').checked;
+  const lProd   = document.getElementById('envProdLabel');
+  const lSandbox = document.getElementById('envSandboxLabel');
+  lProd.style.borderColor    = prod ? '#4a6cf7' : '#d0d8ec';
+  lProd.style.background     = prod ? '#f0f3ff' : '#fafbff';
+  lSandbox.style.borderColor = prod ? '#d0d8ec' : '#4a6cf7';
+  lSandbox.style.background  = prod ? '#fafbff' : '#f0f3ff';
+}
+
+function plLog(msg, type = 'info') {
+  const body  = document.getElementById('plLogBody');
+  const count = document.getElementById('plLogCount');
+  const line  = document.createElement('div');
+  line.className = 'pl-log-line ' + type;
+  const time = new Date().toLocaleTimeString('fr-FR');
+  line.textContent = `[${time}] ${msg}`;
+  body.appendChild(line);
+  body.scrollTop = body.scrollHeight;
+  const total = body.querySelectorAll('.pl-log-line').length;
+  count.textContent = total + ' message' + (total > 1 ? 's' : '');
+  document.getElementById('plLog').classList.add('show');
+}
+
+function plSetProgress(pct, label) {
+  document.getElementById('plProgressBar').style.width = pct + '%';
+  document.getElementById('plProgressLabel').textContent = label;
+  document.getElementById('plProgress').classList.add('show');
+}
+
+function plShowSummary(ok, msg) {
+  const el = document.getElementById('plSummary');
+  const icon = document.getElementById('plSummaryIcon');
+  el.className = 'pl-summary ' + (ok ? 'success' : 'error');
+  icon.innerHTML = ok
+    ? '<polyline points="20 6 9 17 4 12"/>'
+    : '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>';
+  icon.setAttribute('stroke', ok ? '#16a34a' : '#dc2626');
+  document.getElementById('plSummaryText').textContent = msg;
+}
+
+// Formate une ligne CSV en objet écriture Pennylane
+// Convertit une ligne retraitée en objet ledger_entry_line pour l'API Pennylane V2
+function rowToLedgerEntryLine(row, ledgerAccountsMap) {
+  const idxA    = headers.indexOf('Compte');
+  const idxLib  = headers.indexOf('Libelle');
+  const idxD    = headers.indexOf('Debit');
+  const idxC    = headers.indexOf('Credit');
+
+  const accountNumber = idxA >= 0 ? String(row[idxA]).trim() : '';
+  const debit  = parseAmount(row[idxD]);
+  const credit = parseAmount(row[idxC]);
+
+  const line = {
+    label: idxLib >= 0 ? String(row[idxLib]).trim().substring(0, 255) : '',
+    currency_amount: debit > 0 ? debit : credit,
+    currency_amount_before_tax: debit > 0 ? debit : credit,
+    type: debit > 0 ? 'debit' : 'credit',
+  };
+
+  // Résolution du ledger_account_id depuis le numéro de compte
+  if (ledgerAccountsMap[accountNumber]) {
+    line.ledger_account_id = ledgerAccountsMap[accountNumber];
+  } else {
+    line.account_number = accountNumber; // fallback si non trouvé
+  }
+
+  return line;
+}
+
+// Formate la date DD/MM/YYYY ou Excel serial → YYYY-MM-DD
+function formatDate(raw) {
+  const str = String(raw).trim();
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+    }
+  }
+  // Numéro de série Excel (ex: 45678)
+  if (/^\d{5}$/.test(str)) {
+    const d = new Date((parseInt(str) - 25569) * 86400000);
+    return d.toISOString().split('T')[0];
+  }
+  return str || new Date().toISOString().split('T')[0];
+}
+
+async function sendToPennylane() {
+  const token = document.getElementById('plToken').value.trim();
+  if (!token) {
+    alert('Veuillez saisir votre token d\'API Pennylane.');
+    document.getElementById('plToken').focus();
+    return;
+  }
+
+  const data = getProcessedData();
+  if (data.length === 0) {
+    alert('Aucune écriture à envoyer (le fichier est vide après retraitement).');
+    return;
+  }
+
+  const isSandbox = document.getElementById('envSandbox').checked;
+  const journalCode = document.getElementById('plJournal').value.trim() || 'OD';
+  const baseUrl = '/proxy/pennylane/api/external/v2';
+  const plEnv = isSandbox ? 'sandbox' : 'production';
+  const headers_req = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'x-pennylane-env': plEnv };
+
+  // Reset UI
+  document.getElementById('plLog').classList.remove('show');
+  document.getElementById('plLogBody').innerHTML = '';
+  document.getElementById('plLogCount').textContent = '0 lignes';
+  document.getElementById('plSummary').className = 'pl-summary';
+  document.getElementById('plProgress').classList.remove('show');
+  document.getElementById('plProgressBar').style.width = '0%';
+
+  const btn = document.getElementById('btnSendPL');
+  btn.disabled = true;
+  btn.textContent = 'Envoi en cours...';
+
+  plLog(`Environnement : ${isSandbox ? '🧪 Sandbox' : '🚀 Production'}`, 'info');
+  plLog(`${data.length} écriture(s) à traiter · Journal cible : ${journalCode}`, 'info');
+
+  // ── ÉTAPE 1 : Vérification du token ──────────────────────
+  plLog('Vérification du token...', 'info');
+  try {
+    const testRes = await fetch(`${baseUrl}/journals?limit=1`, { headers: headers_req });
+    if (testRes.status === 401) {
+      plLog('❌ Token invalide ou expiré (401). Vérifiez votre token.', 'err');
+      plShowSummary(false, 'Authentification échouée — token invalide ou expiré.');
+      resetBtn(btn); return;
+    }
+    if (testRes.status === 403) {
+      plLog('❌ Accès refusé (403). Vérifiez les scopes du token (ledger_entries:all requis).', 'err');
+      plShowSummary(false, 'Accès refusé — vérifiez les permissions du token.');
+      resetBtn(btn); return;
+    }
+    if (!testRes.ok) {
+      plLog(`❌ Erreur API (${testRes.status}).`, 'err');
+      plShowSummary(false, `Erreur réseau (${testRes.status}).`);
+      resetBtn(btn); return;
+    }
+    plLog('✅ Token valide.', 'ok');
+  } catch (e) {
+    plLog(`❌ Erreur réseau : ${e.message}`, 'err');
+    plShowSummary(false, 'Erreur réseau — voir le journal.'); resetBtn(btn); return;
+  }
+
+  // ── ÉTAPE 2 : Récupérer l'ID du journal cible ────────────
+  plLog(`Recherche du journal "${journalCode}" dans Pennylane...`, 'info');
+  let journalId = null;
+  try {
+    const jRes = await fetch(`${baseUrl}/journals`, { headers: headers_req });
+    const jData = await jRes.json();
+    const journals = jData.journals || jData.items || [];
+    const found = journals.find(j => j.code === journalCode);
+    if (!found) {
+      const codes = journals.map(j => j.code).join(', ');
+      plLog(`❌ Journal "${journalCode}" introuvable. Journaux disponibles : ${codes}`, 'err');
+      plShowSummary(false, `Journal "${journalCode}" introuvable dans Pennylane.`);
+      resetBtn(btn); return;
+    }
+    journalId = found.id;
+    plLog(`✅ Journal trouvé : "${found.label}" (id: ${journalId})`, 'ok');
+  } catch (e) {
+    plLog(`❌ Impossible de récupérer les journaux : ${e.message}`, 'err');
+    plShowSummary(false, 'Erreur lors de la récupération des journaux.'); resetBtn(btn); return;
+  }
+
+  // ── ÉTAPE 3 : Récupérer les ledger accounts (numéro → id) ─
+  plLog('Récupération des comptes comptables...', 'info');
+  const ledgerAccountsMap = {};
+  try {
+    let page = 1, hasMore = true;
+    while (hasMore) {
+      const laRes = await fetch(`${baseUrl}/ledger_accounts?per_page=100&page=${page}`, { headers: headers_req });
+      const laData = await laRes.json();
+      const items = laData.ledger_accounts || laData.items || [];
+      items.forEach(la => {
+        // On prend le compte générique (vat_rate = "any") en priorité
+        if (!ledgerAccountsMap[la.number] || la.vat_rate === 'any') {
+          ledgerAccountsMap[la.number] = la.id;
+        }
+      });
+      hasMore = items.length === 100;
+      page++;
+    }
+    plLog(`✅ ${Object.keys(ledgerAccountsMap).length} comptes comptables chargés.`, 'ok');
+  } catch (e) {
+    plLog(`⚠️ Impossible de charger les comptes comptables : ${e.message}`, 'warn');
+    plLog('Les lignes seront envoyées sans résolution des IDs de compte.', 'warn');
+  }
+
+  // ── ÉTAPE 4 : Regrouper les lignes par écriture (NumeroPiece + Date) ──
+  plLog('Regroupement des lignes par écriture...', 'info');
+  const idxDate  = headers.indexOf('DateExport');
+  const idxPiece = headers.indexOf('NumeroPiece');
+  const idxLib   = headers.indexOf('Libelle');
+
+  const entriesMap = new Map();
+  data.forEach(row => {
+    const date  = idxDate  >= 0 ? formatDate(row[idxDate])  : new Date().toISOString().split('T')[0];
+    const piece = idxPiece >= 0 ? String(row[idxPiece]).trim() : '';
+    const key   = `${date}__${piece}`;
+    if (!entriesMap.has(key)) {
+      entriesMap.set(key, {
+        date,
+        currency: 'EUR',
+        journal_id: journalId,
+        label: idxLib >= 0 ? String(row[idxLib]).trim().substring(0, 255) : piece,
+        ledger_entry_lines_attributes: []
+      });
+    }
+    const line = rowToLedgerEntryLine(row, ledgerAccountsMap);
+    entriesMap.get(key).ledger_entry_lines_attributes.push(line);
+  });
+
+  const entries = Array.from(entriesMap.values());
+  plLog(`${entries.length} écriture(s) construites (regroupement par pièce).`, 'info');
+
+  // ── ÉTAPE 5 : Envoi écriture par écriture ─────────────────
+  let sent = 0, errors = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const pct = Math.round((i / entries.length) * 100);
+    plSetProgress(pct, `Envoi écriture ${i + 1} / ${entries.length}`);
+
+    try {
+      const res = await fetch(`${baseUrl}/ledger_entries`, {
+        method: 'POST',
+        headers: headers_req,
+        body: JSON.stringify({ ledger_entry: entry })
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        sent++;
+        plLog(`✅ Écriture ${i + 1} : ${entry.date} — ${entry.label.substring(0,40)} (${entry.ledger_entry_lines_attributes.length} ligne(s))`, 'ok');
+      } else {
+        errors++;
+        const errMsg = json?.errors ? JSON.stringify(json.errors).substring(0, 150)
+          : json?.message || json?.error || JSON.stringify(json).substring(0, 150);
+        plLog(`❌ Écriture ${i + 1} (${entry.date}) : HTTP ${res.status} — ${errMsg}`, 'err');
+      }
+    } catch (e) {
+      errors++;
+      plLog(`❌ Écriture ${i + 1} : erreur réseau — ${e.message}`, 'err');
+    }
+
+    // Respect du rate limit 5 req/s
+    if (i < entries.length - 1) await new Promise(r => setTimeout(r, 220));
+  }
+
+  plSetProgress(100, 'Terminé');
+
+  if (errors === 0) {
+    plLog(`🎉 Envoi terminé : ${sent} écriture(s) envoyée(s) avec succès.`, 'ok');
+    plShowSummary(true, `✓ ${sent} écriture(s) envoyées avec succès vers Pennylane.`);
+  } else if (sent === 0) {
+    plLog(`❌ Envoi échoué : 0 écriture envoyée (${errors} erreur(s)).`, 'err');
+    plShowSummary(false, `Envoi échoué — ${errors} erreur(s). Consultez le journal.`);
+  } else {
+    plLog(`⚠️ Envoi partiel : ${sent} réussie(s), ${errors} erreur(s).`, 'warn');
+    plShowSummary(false, `Envoi partiel : ${sent} réussie(s), ${errors} erreur(s).`);
+  }
+
+  resetBtn(btn);
+}
+
+function resetBtn(btn) {
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Envoyer les écritures vers Pennylane';
+}
+
+// ── ÉCOUTE OPTIONS ────────────────────────────────────────
+document.getElementById('optCA').addEventListener('change',   () => { updateStats(); refreshPreview(); });
+document.getElementById('optNull').addEventListener('change', () => { updateStats(); refreshPreview(); });
+</script>
+</body>
+</html>

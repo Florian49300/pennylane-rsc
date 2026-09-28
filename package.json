@@ -1,0 +1,15 @@
+{
+  "name": "pennylane-proxy-rsc",
+  "version": "1.0.0",
+  "description": "Serveur proxy pour connecter l'application de retraitement de caisse à l'API Pennylane (contournement CORS)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
