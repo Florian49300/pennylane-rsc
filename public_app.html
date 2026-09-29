@@ -931,7 +931,7 @@ async function plFetchAll(url, headers_req, legacyKey) {
   const all = [];
   let cursor = null, guard = 0;
   do {
-    const u = `${url}?limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const u = `${url}?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     const r = await fetch(u, { headers: headers_req });
     if (!r.ok) throw new Error(`HTTP ${r.status} sur ${url.split('/v2')[1]}`);
     const d = await r.json();
