@@ -896,23 +896,15 @@ function rowToLedgerEntryLine(row, ledgerAccountsMap) {
   const accountNumber = idxA >= 0 ? String(row[idxA]).trim() : '';
   const debit  = parseAmount(row[idxD]);
   const credit = parseAmount(row[idxC]);
-  const amount = debit > 0 ? debit : credit;
 
+  // API v2 : debit / credit sont des chaînes ("123.45"), ledger_account_id obligatoire
   const line = {
     label: idxLib >= 0 ? String(row[idxLib]).trim().substring(0, 255) : '',
-    currency_amount: amount,
-    debit: debit > 0 ? amount : 0,
-    credit: credit > 0 ? amount : 0,
+    debit:  debit.toFixed(2),
+    credit: credit.toFixed(2),
+    ledger_account_id: ledgerAccountsMap[accountNumber] || null,
+    _account_number: accountNumber, // usage interne (retiré avant envoi)
   };
-
-  // Résolution du ledger_account_id depuis le numéro de compte
-  if (ledgerAccountsMap[accountNumber]) {
-    line.ledger_account_id = ledgerAccountsMap[accountNumber];
-  } else {
-    // Pas de résolution possible : on envoie le numéro brut
-    // Pennylane peut créer le compte à la volée selon la config
-    line.account_number = accountNumber;
-  }
 
   return line;
 }
@@ -932,6 +924,21 @@ function formatDate(raw) {
     return d.toISOString().split('T')[0];
   }
   return str || new Date().toISOString().split('T')[0];
+}
+
+// Récupère toutes les pages d'une liste API v2 (pagination par curseur)
+async function plFetchAll(url, headers_req, legacyKey) {
+  const all = [];
+  let cursor = null, guard = 0;
+  do {
+    const u = `${url}?limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const r = await fetch(u, { headers: headers_req });
+    if (!r.ok) throw new Error(`HTTP ${r.status} sur ${url.split('/v2')[1]}`);
+    const d = await r.json();
+    all.push(...(d.items || d[legacyKey] || []));
+    cursor = d.has_more ? d.next_cursor : null;
+  } while (cursor && ++guard < 100);
+  return all;
 }
 
 async function sendToPennylane() {
@@ -998,9 +1005,7 @@ async function sendToPennylane() {
   plLog(`Recherche du journal "${journalCode}" dans Pennylane...`, 'info');
   let journalId = null;
   try {
-    const jRes = await fetch(`${baseUrl}/journals`, { headers: headers_req });
-    const jData = await jRes.json();
-    const journals = jData.journals || jData.items || [];
+    const journals = await plFetchAll(`${baseUrl}/journals`, headers_req, 'journals');
     const found = journals.find(j => j.code === journalCode);
     if (!found) {
       const codes = journals.map(j => j.code).join(', ');
@@ -1019,20 +1024,13 @@ async function sendToPennylane() {
   plLog('Récupération des comptes comptables...', 'info');
   const ledgerAccountsMap = {};
   try {
-    let page = 1, hasMore = true;
-    while (hasMore) {
-      const laRes = await fetch(`${baseUrl}/ledger_accounts?per_page=100&page=${page}`, { headers: headers_req });
-      const laData = await laRes.json();
-      const items = laData.ledger_accounts || laData.items || [];
-      items.forEach(la => {
-        // On prend le compte générique (vat_rate = "any") en priorité
-        if (!ledgerAccountsMap[la.number] || la.vat_rate === 'any') {
-          ledgerAccountsMap[la.number] = la.id;
-        }
-      });
-      hasMore = items.length === 100;
-      page++;
-    }
+    const items = await plFetchAll(`${baseUrl}/ledger_accounts`, headers_req, 'ledger_accounts');
+    items.forEach(la => {
+      // On prend le compte générique (vat_rate = "any") en priorité
+      if (!ledgerAccountsMap[la.number] || la.vat_rate === 'any') {
+        ledgerAccountsMap[la.number] = la.id;
+      }
+    });
     plLog(`✅ ${Object.keys(ledgerAccountsMap).length} comptes comptables chargés.`, 'ok');
   } catch (e) {
     plLog(`⚠️ Impossible de charger les comptes comptables : ${e.message}`, 'warn');
@@ -1055,16 +1053,38 @@ async function sendToPennylane() {
         date,
         currency: 'EUR',
         journal_id: journalId,
-        label: idxLib >= 0 ? String(row[idxLib]).trim().substring(0, 255) : piece,
-        ledger_entry_lines_attributes: []
+        label: (idxLib >= 0 ? String(row[idxLib]).trim().substring(0, 255) : '') || piece || 'Écriture',
+        piece_number: piece || undefined,
+        ledger_entry_lines: []
       });
     }
     const line = rowToLedgerEntryLine(row, ledgerAccountsMap);
-    entriesMap.get(key).ledger_entry_lines_attributes.push(line);
+    entriesMap.get(key).ledger_entry_lines.push(line);
   });
 
   const entries = Array.from(entriesMap.values());
   plLog(`${entries.length} écriture(s) construites (regroupement par pièce).`, 'info');
+
+  // ── Contrôle : comptes introuvables dans Pennylane ─────────
+  const missing = new Set();
+  entries.forEach(e => e.ledger_entry_lines.forEach(l => { if (!l.ledger_account_id) missing.add(l._account_number); }));
+  if (missing.size > 0) {
+    plLog(`❌ ${missing.size} compte(s) du fichier introuvable(s) dans Pennylane : ${[...missing].join(', ')}`, 'err');
+    plLog('Créez ces comptes dans Pennylane (ou corrigez le mapping), puis relancez l\'envoi.', 'warn');
+    plShowSummary(false, `${missing.size} compte(s) introuvable(s) dans Pennylane — aucun envoi effectué.`);
+    resetBtn(btn); return;
+  }
+
+  // ── Contrôle : équilibre débit / crédit de chaque écriture ──
+  const unbalanced = entries.filter(e => {
+    const t = e.ledger_entry_lines.reduce((s, l) => s + Math.round(parseFloat(l.debit) * 100) - Math.round(parseFloat(l.credit) * 100), 0);
+    return t !== 0;
+  });
+  if (unbalanced.length > 0) {
+    unbalanced.slice(0, 10).forEach(e => plLog(`❌ Écriture déséquilibrée : ${e.date} — pièce ${e.piece_number || '(sans n°)'}`, 'err'));
+    plShowSummary(false, `${unbalanced.length} écriture(s) déséquilibrée(s) — aucun envoi effectué.`);
+    resetBtn(btn); return;
+  }
 
   // ── ÉTAPE 5 : Envoi écriture par écriture ─────────────────
   let sent = 0, errors = 0;
@@ -1083,7 +1103,8 @@ async function sendToPennylane() {
           currency: entry.currency,
           journal_id: entry.journal_id,
           label: entry.label,
-          ledger_entry_lines_attributes: entry.ledger_entry_lines_attributes
+          piece_number: entry.piece_number,
+          ledger_entry_lines: entry.ledger_entry_lines.map(({ _account_number, ...l }) => l)
         })
       });
 
@@ -1091,11 +1112,11 @@ async function sendToPennylane() {
 
       if (res.ok) {
         sent++;
-        plLog(`✅ Écriture ${i + 1} : ${entry.date} — ${entry.label.substring(0,40)} (${entry.ledger_entry_lines_attributes.length} ligne(s))`, 'ok');
+        plLog(`✅ Écriture ${i + 1} : ${entry.date} — ${entry.label.substring(0,40)} (${entry.ledger_entry_lines.length} ligne(s))`, 'ok');
       } else {
         errors++;
-        const errMsg = json?.errors ? JSON.stringify(json.errors).substring(0, 150)
-          : json?.message || json?.error || JSON.stringify(json).substring(0, 150);
+        const errMsg = json?.errors ? JSON.stringify(json.errors).substring(0, 400)
+          : json?.message || json?.error || JSON.stringify(json).substring(0, 400);
         plLog(`❌ Écriture ${i + 1} (${entry.date}) : HTTP ${res.status} — ${errMsg}`, 'err');
       }
     } catch (e) {
