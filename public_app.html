@@ -896,19 +896,22 @@ function rowToLedgerEntryLine(row, ledgerAccountsMap) {
   const accountNumber = idxA >= 0 ? String(row[idxA]).trim() : '';
   const debit  = parseAmount(row[idxD]);
   const credit = parseAmount(row[idxC]);
+  const amount = debit > 0 ? debit : credit;
 
   const line = {
     label: idxLib >= 0 ? String(row[idxLib]).trim().substring(0, 255) : '',
-    currency_amount: debit > 0 ? debit : credit,
-    currency_amount_before_tax: debit > 0 ? debit : credit,
-    type: debit > 0 ? 'debit' : 'credit',
+    currency_amount: amount,
+    debit: debit > 0 ? amount : 0,
+    credit: credit > 0 ? amount : 0,
   };
 
   // Résolution du ledger_account_id depuis le numéro de compte
   if (ledgerAccountsMap[accountNumber]) {
     line.ledger_account_id = ledgerAccountsMap[accountNumber];
   } else {
-    line.account_number = accountNumber; // fallback si non trouvé
+    // Pas de résolution possible : on envoie le numéro brut
+    // Pennylane peut créer le compte à la volée selon la config
+    line.account_number = accountNumber;
   }
 
   return line;
@@ -1075,7 +1078,13 @@ async function sendToPennylane() {
       const res = await fetch(`${baseUrl}/ledger_entries`, {
         method: 'POST',
         headers: headers_req,
-        body: JSON.stringify({ ledger_entry: entry })
+        body: JSON.stringify({
+          date: entry.date,
+          currency: entry.currency,
+          journal_id: entry.journal_id,
+          label: entry.label,
+          ledger_entry_lines_attributes: entry.ledger_entry_lines_attributes
+        })
       });
 
       const json = await res.json().catch(() => ({}));
